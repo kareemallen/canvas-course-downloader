@@ -14,6 +14,7 @@ const CONTENT_SCRIPT_FILES = [
   "client-zip.min.js",
   "turndown.min.js",
   "turndown-plugin-gfm.min.js",
+  "host-utils.js",
   "helpers.js",
   "detector.js",
   "canvas-api.js",
@@ -21,6 +22,7 @@ const CONTENT_SCRIPT_FILES = [
   "downloader.js",
   "content.js",
 ];
+importScripts("host-utils.js");
 
 let jobs = [];
 let nextJobId = 0;
@@ -79,42 +81,10 @@ function persistState() {
 // handler awaits it.
 ensureStateLoaded();
 
-function normalizeHost(raw) {
-  if (!raw) return null;
-  const value = String(raw).trim().toLowerCase().replace(/\*+/g, "");
-  if (!value) return null;
-  try {
-    const hasScheme = /^[a-z]+:\/\//i.test(value);
-    const parsed = new URL(hasScheme ? value : `https://${value}`);
-    return parsed.hostname || null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeHostList(list) {
-  const unique = new Set();
-  for (const item of Array.isArray(list) ? list : []) {
-    const host = normalizeHost(item);
-    if (host) unique.add(host);
-  }
-  return [...unique];
-}
-
-function isHostAllowed(hostname, hosts, allowSubdomains) {
-  if (!hostname) return false;
-  const host = String(hostname).toLowerCase();
-  for (const allowed of hosts) {
-    if (host === allowed) return true;
-    if (allowSubdomains && host.endsWith(`.${allowed}`)) return true;
-  }
-  return false;
-}
-
 async function getDomainSettings() {
   const settings = await chrome.storage.sync.get(SETTINGS_DEFAULTS);
   return {
-    hosts: normalizeHostList(settings.allowedCanvasHosts),
+    hosts: HostUtils.normalizeHostList(settings.allowedCanvasHosts),
     allowSubdomains: !!settings.allowCanvasSubdomains,
   };
 }
@@ -171,7 +141,7 @@ async function ensureTabReady(tab) {
 
   const { hosts, allowSubdomains } = await getDomainSettings();
   if (hosts.length === 0) return { ready: false, reason: "not_configured" };
-  if (!isHostAllowed(hostname, hosts, allowSubdomains)) return { ready: false, reason: "not_allowed" };
+  if (!HostUtils.isHostAllowed(hostname, hosts, allowSubdomains)) return { ready: false, reason: "not_allowed" };
 
   const ping = await sendMessageSafe(tab.id, { action: "ping" });
   if (ping.ok && ping.response?.status === "ok") return { ready: true };

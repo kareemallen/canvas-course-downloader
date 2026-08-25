@@ -89,38 +89,8 @@ function updateFileSizeFieldVisibility() {
   document.getElementById("max-file-size-field").style.display = on ? "" : "none";
 }
 
-function normalizeHostInput(raw) {
-  const input = String(raw || "").trim().toLowerCase().replace(/\*+/g, "");
-  if (!input) return null;
-  try {
-    const parsed = new URL(/^[a-z]+:\/\//i.test(input) ? input : `https://${input}`);
-    return parsed.hostname || null;
-  } catch {
-    return null;
-  }
-}
-
 function parseAllowlistInput(text) {
-  const entries = String(text || "")
-    .split(/\r?\n|,/)
-    .map((v) => v.trim())
-    .filter(Boolean);
-  const hosts = [];
-  const invalid = [];
-  const seen = new Set();
-
-  for (const entry of entries) {
-    const host = normalizeHostInput(entry);
-    if (!host) {
-      invalid.push(entry);
-      continue;
-    }
-    if (seen.has(host)) continue;
-    seen.add(host);
-    hosts.push(host);
-  }
-
-  return { hosts, invalid };
+  return HostUtils.parseHostAllowlistInput(text);
 }
 
 function loadSettings() {

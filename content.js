@@ -6,7 +6,7 @@
  * popup and background service worker.
  *
  * Module load order (all share the global scope):
- *   helpers.js → detector.js → canvas-api.js → ui.js → downloader.js → content.js
+ *   host-utils.js → helpers.js → detector.js → canvas-api.js → ui.js → downloader.js → content.js
  */
 
 // ---------------------------------------------------------------------------
@@ -16,41 +16,14 @@
 const DOMAIN_DEFAULTS = { allowedCanvasHosts: [], allowCanvasSubdomains: false };
 let hostAllowed = true;
 
-function normalizeHost(raw) {
-  if (!raw) return null;
-  const value = String(raw).trim().toLowerCase().replace(/\*+/g, "");
-  if (!value) return null;
-  try {
-    const parsed = new URL(/^[a-z]+:\/\//i.test(value) ? value : `https://${value}`);
-    return parsed.hostname || null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeHosts(list) {
-  const seen = new Set();
-  for (const item of Array.isArray(list) ? list : []) {
-    const host = normalizeHost(item);
-    if (host) seen.add(host);
-  }
-  return [...seen];
-}
-
-function isHostAllowed(hostname, hosts, allowSubdomains) {
-  if (!hostname) return false;
-  const host = String(hostname).toLowerCase();
-  for (const allowed of hosts) {
-    if (host === allowed) return true;
-    if (allowSubdomains && host.endsWith(`.${allowed}`)) return true;
-  }
-  return false;
-}
-
 function resolveHostAllowed(callback) {
   chrome.storage.sync.get(DOMAIN_DEFAULTS, (settings) => {
-    const allowedHosts = normalizeHosts(settings.allowedCanvasHosts);
-    hostAllowed = isHostAllowed(window.location.hostname, allowedHosts, !!settings.allowCanvasSubdomains);
+    const allowedHosts = HostUtils.normalizeHostList(settings.allowedCanvasHosts);
+    hostAllowed = HostUtils.isHostAllowed(
+      window.location.hostname,
+      allowedHosts,
+      !!settings.allowCanvasSubdomains
+    );
     window.__canvasDownloaderHostAllowed = hostAllowed;
     callback(hostAllowed);
   });

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Canvas Course Downloader — Host Utils Tests</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 20px; margin-bottom: 20px; }
+    .pass { color: #1a7f37; }
+    .fail { color: #cf222e; font-weight: 600; }
+    .result { padding: 4px 0; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
+    .summary { margin-top: 20px; padding: 12px; border-radius: 8px; font-weight: 600; font-size: 15px; }
+    .summary.all-pass { background: #d4edda; color: #1a7f37; }
+    .summary.has-fail { background: #fdd; color: #cf222e; }
+  </style>
+</head>
+<body>
+  <h1>Host Utility Unit Tests</h1>
+  <div id="results"></div>
+  <div id="summary"></div>
+
+  <script src="../host-utils.js"></script>
+  <script>
+    const results = document.getElementById("results");
+    let passed = 0, failed = 0;
+
+    function assertEqual(name, actual, expected) {
+      const pass = JSON.stringify(actual) === JSON.stringify(expected);
+      const el = document.createElement("div");
+      el.className = "result";
+      if (pass) {
+        el.innerHTML = `<span class="pass">PASS</span> ${name}`;
+        passed++;
+      } else {
+        el.innerHTML = `<span class="fail">FAIL</span> ${name} — expected <code>${JSON.stringify(expected)}</code>, got <code>${JSON.stringify(actual)}</code>`;
+        failed++;
+      }
+      results.appendChild(el);
+    }
+
+    assertEqual("normalizeHost: trims and lowercases", HostUtils.normalizeHost("  Canvas.Example.EDU "), "canvas.example.edu");
+    assertEqual("normalizeHost: strips wildcard", HostUtils.normalizeHost("*.canvas.example.edu"), ".canvas.example.edu");
+    assertEqual("normalizeHost: parses full URL", HostUtils.normalizeHost("https://Canvas.Example.EDU/courses"), "canvas.example.edu");
+    assertEqual("normalizeHost: rejects invalid host", HostUtils.normalizeHost("not a host ###"), null);
+    assertEqual("normalizeHost: rejects empty input", HostUtils.normalizeHost("   "), null);
+
+    assertEqual(
+      "normalizeHostList: dedupes and filters invalid",
+      HostUtils.normalizeHostList(["Canvas.Example.EDU", "https://canvas.example.edu/path", "invalid ###", "canvas.example.edu"]),
+      ["canvas.example.edu"]
+    );
+
+    assertEqual(
+      "parseHostAllowlistInput: returns hosts and invalid entries",
+      HostUtils.parseHostAllowlistInput("canvas.example.edu,invalid ###\nhttps://school.instructure.com"),
+      { hosts: ["canvas.example.edu", "school.instructure.com"], invalid: ["invalid ###"] }
+    );
+
+    assertEqual(
+      "isHostAllowed: exact match",
+      HostUtils.isHostAllowed("canvas.example.edu", ["canvas.example.edu"], false),
+      true
+    );
+    assertEqual(
+      "isHostAllowed: subdomain blocked when disabled",
+      HostUtils.isHostAllowed("foo.canvas.example.edu", ["canvas.example.edu"], false),
+      false
+    );
+    assertEqual(
+      "isHostAllowed: subdomain allowed when enabled",
+      HostUtils.isHostAllowed("foo.canvas.example.edu", ["canvas.example.edu"], true),
+      true
+    );
+
+    const summary = document.getElementById("summary");
+    summary.textContent = `${passed} passed, ${failed} failed out of ${passed + failed} tests`;
+    summary.className = `summary ${failed === 0 ? "all-pass" : "has-fail"}`;
+  </script>
+</body>
+</html>

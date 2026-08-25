@@ -29,37 +29,6 @@ const CDN_ORIGIN = { origins: ["*://*.canvas-user-content.com/*"] };
 let cdnPermissionRelevant = true;
 const DOMAIN_DEFAULTS = { allowedCanvasHosts: [], allowCanvasSubdomains: false };
 
-function normalizeHost(raw) {
-  if (!raw) return null;
-  const value = String(raw).trim().toLowerCase().replace(/\*+/g, "");
-  if (!value) return null;
-  try {
-    const parsed = new URL(/^[a-z]+:\/\//i.test(value) ? value : `https://${value}`);
-    return parsed.hostname || null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeHosts(list) {
-  const seen = new Set();
-  for (const item of Array.isArray(list) ? list : []) {
-    const host = normalizeHost(item);
-    if (host) seen.add(host);
-  }
-  return [...seen];
-}
-
-function isHostAllowed(host, hosts, allowSubdomains) {
-  if (!host) return false;
-  const normalized = host.toLowerCase();
-  for (const allowed of hosts) {
-    if (normalized === allowed) return true;
-    if (allowSubdomains && normalized.endsWith(`.${allowed}`)) return true;
-  }
-  return false;
-}
-
 async function ensureCdnPermission() {
   if (!cdnPermissionRelevant) return;
   try {
@@ -115,7 +84,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     chrome.storage.sync.get(DOMAIN_DEFAULTS, (domainSettings) => {
-      const hosts = normalizeHosts(domainSettings.allowedCanvasHosts);
+      const hosts = HostUtils.normalizeHostList(domainSettings.allowedCanvasHosts);
       const allowSubdomains = !!domainSettings.allowCanvasSubdomains;
 
       if (hosts.length === 0) {
@@ -133,7 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch {
         tabHost = null;
       }
-      if (!tabHost || !isHostAllowed(tabHost, hosts, allowSubdomains)) {
+      if (!tabHost || !HostUtils.isHostAllowed(tabHost, hosts, allowSubdomains)) {
         setStatus("Current site is not in your Canvas allowlist.", "error");
         downloadBtnLabel.textContent = "Open settings";
         downloadBtn.disabled = false;
