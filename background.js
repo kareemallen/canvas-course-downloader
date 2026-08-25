@@ -8,6 +8,19 @@
  */
 
 const STATE = { QUEUED: "queued", DOWNLOADING: "downloading", COMPLETE: "complete", FAILED: "failed" };
+const SETTINGS_DEFAULTS = { allowedCanvasHosts: [], allowCanvasSubdomains: false };
+const CONTENT_SCRIPT_ID = "canvas-course-content-script";
+const CONTENT_SCRIPT_FILES = [
+  "client-zip.min.js",
+  "turndown.min.js",
+  "turndown-plugin-gfm.min.js",
+  "helpers.js",
+  "detector.js",
+  "canvas-api.js",
+  "ui.js",
+  "downloader.js",
+  "content.js",
+];
 
 let jobs = [];
 let nextJobId = 0;
@@ -65,6 +78,137 @@ function persistState() {
 // Kick off the initial load so it's already in flight when the first event
 // handler awaits it.
 ensureStateLoaded();
+
+function normalizeHost(raw) {
+  if (!raw) return null;
+  const value = String(raw).trim().toLowerCase().replace(/\*+/g, "");
+  if (!value) return null;
+  try {
+    const hasScheme = /^[a-z]+:\/\//i.test(value);
+    const parsed = new URL(hasScheme ? value : `https://${value}`);
+    return parsed.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHostList(list) {
+  const unique = new Set();
+  for (const item of Array.isArray(list) ? list : []) {
+    const host = normalizeHost(item);
+    if (host) unique.add(host);
+  }
+  return [...unique];
+}
+
+function isHostAllowed(hostname, hosts, allowSubdomains) {
+  if (!hostname) return false;
+  const host = String(hostname).toLowerCase();
+  for (const allowed of hosts) {
+    if (host === allowed) return true;
+    if (allowSubdomains && host.endsWith(`.${allowed}`)) return true;
+  }
+  return false;
+}
+
+async function getDomainSettings() {
+  const settings = await chrome.storage.sync.get(SETTINGS_DEFAULTS);
+  return {
+    hosts: normalizeHostList(settings.allowedCanvasHosts),
+    allowSubdomains: !!settings.allowCanvasSubdomains,
+  };
+}
+
+function buildMatchPatterns(hosts, allowSubdomains) {
+  const matches = [];
+  for (const host of hosts) {
+    matches.push(`https://${host}/*`);
+    if (allowSubdomains) matches.push(`https://*.${host}/*`);
+  }
+  return [...new Set(matches)];
+}
+
+async function registerConfiguredContentScripts() {
+  await chrome.scripting.unregisterContentScripts({ ids: [CONTENT_SCRIPT_ID] }).catch(() => {});
+  const { hosts, allowSubdomains } = await getDomainSettings();
+  const matches = buildMatchPatterns(hosts, allowSubdomains);
+  if (matches.length === 0) return;
+  await chrome.scripting.registerContentScripts([{
+    id: CONTENT_SCRIPT_ID,
+    matches,
+    js: CONTENT_SCRIPT_FILES,
+    runAt: "document_idle",
+    persistAcrossSessions: true,
+  }]);
+}
+
+function getTabHostname(tabUrl) {
+  try {
+    const url = new URL(tabUrl);
+    if (url.protocol !== "https:") return null;
+    return url.hostname;
+  } catch {
+    return null;
+  }
+}
+
+function sendMessageSafe(tabId, message) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, response: null });
+      } else {
+        resolve({ ok: true, response });
+      }
+    });
+  });
+}
+
+async function ensureTabReady(tab) {
+  if (!tab?.id || !tab?.url) return { ready: false, reason: "missing_tab" };
+  const hostname = getTabHostname(tab.url);
+  if (!hostname) return { ready: false, reason: "invalid_protocol" };
+
+  const { hosts, allowSubdomains } = await getDomainSettings();
+  if (hosts.length === 0) return { ready: false, reason: "not_configured" };
+  if (!isHostAllowed(hostname, hosts, allowSubdomains)) return { ready: false, reason: "not_allowed" };
+
+  const ping = await sendMessageSafe(tab.id, { action: "ping" });
+  if (ping.ok && ping.response?.status === "ok") return { ready: true };
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: CONTENT_SCRIPT_FILES,
+  }).catch(() => {});
+  const retryPing = await sendMessageSafe(tab.id, { action: "ping" });
+  return retryPing.ok && retryPing.response?.status === "ok"
+    ? { ready: true }
+    : { ready: false, reason: "inject_failed" };
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  registerConfiguredContentScripts().catch((err) => {
+    console.warn("Failed to register content scripts:", err);
+  });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  registerConfiguredContentScripts().catch((err) => {
+    console.warn("Failed to register content scripts:", err);
+  });
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync") return;
+  if (!changes.allowedCanvasHosts && !changes.allowCanvasSubdomains) return;
+  registerConfiguredContentScripts().catch((err) => {
+    console.warn("Failed to refresh content scripts:", err);
+  });
+});
+
+registerConfiguredContentScripts().catch((err) => {
+  console.warn("Initial content script registration failed:", err);
+});
 
 // ---------------------------------------------------------------------------
 // Status helpers
@@ -214,17 +358,17 @@ chrome.commands.onCommand.addListener((command) => {
   if (command !== "download-current") return;
   chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     if (!tab) return;
-    chrome.tabs.sendMessage(tab.id, { action: "get_status" }, (response) => {
-      if (chrome.runtime.lastError || !response?.isCanvas) return;
-      const action = response.courseId ? "trigger_download" : "open_course_selector";
-      chrome.tabs.sendMessage(tab.id, { action });
-    });
+    (async () => {
+      const ready = await ensureTabReady(tab);
+      if (!ready.ready) return;
+      chrome.tabs.sendMessage(tab.id, { action: "get_status" }, (response) => {
+        if (chrome.runtime.lastError || !response?.isCanvas) return;
+        const action = response.courseId ? "trigger_download" : "open_course_selector";
+        chrome.tabs.sendMessage(tab.id, { action });
+      });
+    })().catch(() => {});
   });
 });
-
-// ---------------------------------------------------------------------------
-// Message handling
-// ---------------------------------------------------------------------------
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Async IIFE + `return true` keeps the message channel open across the
@@ -233,7 +377,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     await ensureStateLoaded();
 
-    if (message.type === "START_DOWNLOAD") {
+    if (message.type === "ENSURE_TAB_READY") {
+      let tab = sender.tab || null;
+      if (!tab && message.tabId) {
+        tab = await chrome.tabs.get(message.tabId).catch(() => null);
+      }
+      const result = await ensureTabReady(tab);
+      sendResponse(result);
+    } else if (message.type === "START_DOWNLOAD") {
       const { files, courseName, conflictAction, throttleMs, folderPrefix } = message.payload;
       const safeName = courseName.replace(/[/\\?%*:|"<>]/g, "-");
 

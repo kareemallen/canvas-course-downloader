@@ -19,6 +19,7 @@
     "declarativeNetRequest",
     "downloads",
     "notifications",
+    "scripting",
     "storage"
   ],
   "host_permissions": [
@@ -39,25 +40,6 @@
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://*/*"
-      ],
-      "js": [
-        "client-zip.min.js",
-        "turndown.min.js",
-        "turndown-plugin-gfm.min.js",
-        "helpers.js",
-        "detector.js",
-        "canvas-api.js",
-        "ui.js",
-        "downloader.js",
-        "content.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
   "web_accessible_resources": [
     {
       "resources": ["icons/icon-128.png"],

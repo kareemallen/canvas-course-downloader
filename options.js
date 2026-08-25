@@ -27,6 +27,8 @@ const DEFAULTS = {
   maxFileSizeMB: 0,
   preset: "full-archive",
   exportFormat: "html",
+  allowedCanvasHosts: [],
+  allowCanvasSubdomains: false,
 };
 
 const PRESETS = {
@@ -87,6 +89,40 @@ function updateFileSizeFieldVisibility() {
   document.getElementById("max-file-size-field").style.display = on ? "" : "none";
 }
 
+function normalizeHostInput(raw) {
+  const input = String(raw || "").trim().toLowerCase().replace(/\*+/g, "");
+  if (!input) return null;
+  try {
+    const parsed = new URL(/^[a-z]+:\/\//i.test(input) ? input : `https://${input}`);
+    return parsed.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function parseAllowlistInput(text) {
+  const entries = String(text || "")
+    .split(/\r?\n|,/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const hosts = [];
+  const invalid = [];
+  const seen = new Set();
+
+  for (const entry of entries) {
+    const host = normalizeHostInput(entry);
+    if (!host) {
+      invalid.push(entry);
+      continue;
+    }
+    if (seen.has(host)) continue;
+    seen.add(host);
+    hosts.push(host);
+  }
+
+  return { hosts, invalid };
+}
+
 function loadSettings() {
   chrome.storage.sync.get(DEFAULTS, (settings) => {
     // Content types
@@ -104,6 +140,8 @@ function loadSettings() {
     document.getElementById("limit-file-size").checked = settings.maxFileSizeMB > 0;
     document.getElementById("max-file-size").value = settings.maxFileSizeMB || "";
     document.getElementById("export-format").value = settings.exportFormat || "html";
+    document.getElementById("canvas-hosts").value = (settings.allowedCanvasHosts || []).join("\n");
+    document.getElementById("allow-canvas-subdomains").checked = !!settings.allowCanvasSubdomains;
     updateFileSizeFieldVisibility();
 
     // Preset highlight
@@ -115,6 +153,13 @@ function loadSettings() {
 function saveSettings() {
   const contentTypes = {};
   getCheckboxes().forEach((cb) => (contentTypes[cb.dataset.key] = cb.checked));
+  const allowlistError = document.getElementById("canvas-hosts-error");
+  allowlistError.textContent = "";
+  const parsedAllowlist = parseAllowlistInput(document.getElementById("canvas-hosts").value);
+  if (parsedAllowlist.invalid.length > 0) {
+    allowlistError.textContent = `Invalid domain entries: ${parsedAllowlist.invalid.join(", ")}`;
+    return;
+  }
 
   const settings = {
     contentTypes,
@@ -129,6 +174,8 @@ function saveSettings() {
       : 0,
     preset: detectPreset(),
     exportFormat: document.getElementById("export-format").value,
+    allowedCanvasHosts: parsedAllowlist.hosts,
+    allowCanvasSubdomains: document.getElementById("allow-canvas-subdomains").checked,
   };
 
   chrome.storage.sync.set(settings, () => {

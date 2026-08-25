@@ -467,6 +467,18 @@
           <h2 class="panel-title">Downloads</h2>
           <p class="panel-sub">How files are saved and how downloads behave.</p>
 
+          <div class="field">
+            <label for="canvas-hosts">Allowed Canvas domains</label>
+            <textarea id="canvas-hosts" rows="4" placeholder="canvas.university.edu&#10;school.instructure.com" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;resize:vertical;"></textarea>
+            <div class="hint">One domain per line (or comma-separated). Only configured domains can run the extension.</div>
+            <div id="canvas-hosts-error" class="hint" style="color:#b91c1c;"></div>
+          </div>
+
+          <div class="toggle-row">
+            <label><input type="checkbox" id="allow-canvas-subdomains" class="custom-checkbox"> Allow subdomains for all allowed domains</label>
+            <div class="hint">Off by default. When enabled, <code>canvas.example.edu</code> also allows <code>*.canvas.example.edu</code>.</div>
+          </div>
+
           <div class="callout">
             <strong>Before a large export:</strong> turn <em>off</em> "Ask where to save each file before downloading" in
             your browser's download settings. Otherwise the browser prompts you to pick a location for every single file,

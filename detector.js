@@ -51,6 +51,7 @@ const DASHBOARD_SELECTORS = [
 ];
 
 function isCanvas() {
+  if (window.__canvasDownloaderHostAllowed === false) return false;
   if (window.location.hostname.includes("instructure.com")) return true;
   let hits = 0;
   for (const signal of CANVAS_SIGNALS) {

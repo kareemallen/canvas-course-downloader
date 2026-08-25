@@ -27,6 +27,38 @@ const CONTENT_TYPE_LABELS = {
 // non-fatal — the downloader shows a hint and Settings offers a manual grant.
 const CDN_ORIGIN = { origins: ["*://*.canvas-user-content.com/*"] };
 let cdnPermissionRelevant = true;
+const DOMAIN_DEFAULTS = { allowedCanvasHosts: [], allowCanvasSubdomains: false };
+
+function normalizeHost(raw) {
+  if (!raw) return null;
+  const value = String(raw).trim().toLowerCase().replace(/\*+/g, "");
+  if (!value) return null;
+  try {
+    const parsed = new URL(/^[a-z]+:\/\//i.test(value) ? value : `https://${value}`);
+    return parsed.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHosts(list) {
+  const seen = new Set();
+  for (const item of Array.isArray(list) ? list : []) {
+    const host = normalizeHost(item);
+    if (host) seen.add(host);
+  }
+  return [...seen];
+}
+
+function isHostAllowed(host, hosts, allowSubdomains) {
+  if (!host) return false;
+  const normalized = host.toLowerCase();
+  for (const allowed of hosts) {
+    if (normalized === allowed) return true;
+    if (allowSubdomains && normalized.endsWith(`.${allowed}`)) return true;
+  }
+  return false;
+}
 
 async function ensureCdnPermission() {
   if (!cdnPermissionRelevant) return;
@@ -82,48 +114,83 @@ document.addEventListener("DOMContentLoaded", () => {
   maybeShowFeedbackPrompt();
 
   chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-    chrome.tabs.sendMessage(tab.id, { action: "get_status" }, (response) => {
-      if (chrome.runtime.lastError || !response) {
-        setStatus("Not on a Canvas page.", "error");
+    chrome.storage.sync.get(DOMAIN_DEFAULTS, (domainSettings) => {
+      const hosts = normalizeHosts(domainSettings.allowedCanvasHosts);
+      const allowSubdomains = !!domainSettings.allowCanvasSubdomains;
+
+      if (hosts.length === 0) {
+        setStatus("Set allowed Canvas domains in Settings first.", "error");
+        downloadBtnLabel.textContent = "Open settings";
+        downloadBtn.disabled = false;
+        downloadBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
         return;
       }
 
-      if (response.isCanvas && response.courseId) {
-        setStatus("Course detected", "success");
-        downloadBtnLabel.textContent = "Download course content";
-        downloadBtn.disabled = false;
-
-        // Show course info panel
-        const infoSection = document.getElementById("courseInfo");
-        infoSection.style.display = "block";
-
-        const courseName = response.courseName || tab.title?.split(":")[0].trim() || `Course ${response.courseId}`;
-        document.getElementById("courseName").innerHTML =
-          `<span class="info-value">${courseName}</span>`;
-
-        downloadBtn.addEventListener("click", async () => {
-          downloadBtn.disabled = true;
-          downloadBtnLabel.textContent = "Starting...";
-          await ensureCdnPermission();
-          chrome.tabs.sendMessage(tab.id, { action: "trigger_download" }, () => {
-            downloadBtnLabel.textContent = "Queued!";
-            setTimeout(() => window.close(), 1500);
-          });
-        });
-      } else if (response.isCanvas && response.isHomepage) {
-        setStatus("Canvas dashboard detected", "success");
-        downloadBtnLabel.textContent = "Select courses to download";
-        downloadBtn.disabled = false;
-
-        downloadBtn.addEventListener("click", async () => {
-          await ensureCdnPermission();
-          chrome.tabs.sendMessage(tab.id, { action: "open_course_selector" }, () => {
-            window.close();
-          });
-        });
-      } else {
-        setStatus("Navigate to a Canvas page first.", "error");
+      let tabHost = null;
+      try {
+        const url = new URL(tab?.url || "");
+        tabHost = url.protocol === "https:" ? url.hostname : null;
+      } catch {
+        tabHost = null;
       }
+      if (!tabHost || !isHostAllowed(tabHost, hosts, allowSubdomains)) {
+        setStatus("Current site is not in your Canvas allowlist.", "error");
+        downloadBtnLabel.textContent = "Open settings";
+        downloadBtn.disabled = false;
+        downloadBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
+        return;
+      }
+
+      chrome.runtime.sendMessage({ type: "ENSURE_TAB_READY", tabId: tab.id }, (ready) => {
+        if (chrome.runtime.lastError || !ready?.ready) {
+          setStatus("Unable to initialize on this page. Refresh and try again.", "error");
+          return;
+        }
+
+        chrome.tabs.sendMessage(tab.id, { action: "get_status" }, (response) => {
+          if (chrome.runtime.lastError || !response) {
+            setStatus("Not on a Canvas page.", "error");
+            return;
+          }
+
+          if (response.isCanvas && response.courseId) {
+            setStatus("Course detected", "success");
+            downloadBtnLabel.textContent = "Download course content";
+            downloadBtn.disabled = false;
+
+            // Show course info panel
+            const infoSection = document.getElementById("courseInfo");
+            infoSection.style.display = "block";
+
+            const courseName = response.courseName || tab.title?.split(":")[0].trim() || `Course ${response.courseId}`;
+            document.getElementById("courseName").innerHTML =
+              `<span class="info-value">${courseName}</span>`;
+
+            downloadBtn.addEventListener("click", async () => {
+              downloadBtn.disabled = true;
+              downloadBtnLabel.textContent = "Starting...";
+              await ensureCdnPermission();
+              chrome.tabs.sendMessage(tab.id, { action: "trigger_download" }, () => {
+                downloadBtnLabel.textContent = "Queued!";
+                setTimeout(() => window.close(), 1500);
+              });
+            });
+          } else if (response.isCanvas && response.isHomepage) {
+            setStatus("Canvas dashboard detected", "success");
+            downloadBtnLabel.textContent = "Select courses to download";
+            downloadBtn.disabled = false;
+
+            downloadBtn.addEventListener("click", async () => {
+              await ensureCdnPermission();
+              chrome.tabs.sendMessage(tab.id, { action: "open_course_selector" }, () => {
+                window.close();
+              });
+            });
+          } else {
+            setStatus("Navigate to a Canvas page first.", "error");
+          }
+        });
+      });
     });
   });
 });

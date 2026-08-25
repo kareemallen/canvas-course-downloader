@@ -41,6 +41,7 @@ If you teach, it doubles as an end-of-term archiving tool: it detects your instr
 - Saves into organized subfolders per course with your original Canvas folder structure preserved
 - Four built-in presets (Full Archive, Files Only, Text Only, Linked Only) plus custom configuration
 - Configurable download throttling, file conflict handling, and folder prefix
+- Configurable Canvas domain allowlist with optional global subdomain matching
 - Keyboard shortcut: <kbd>Ctrl+Shift+D</kbd> (Mac: <kbd>Cmd+Shift+D</kbd>)
 - Works with any Canvas instance, including self-hosted installations on custom domains
 - No API tokens needed. Runs entirely in your browser with nothing sent to external servers
@@ -125,6 +126,8 @@ Open settings from the extension popup or your browser's extension options page.
 | Presets | Quick-select common combos: Full Archive, Files Only, Text Content Only, Linked Files Only |
 | File conflict handling | Choose Rename (add a number suffix) or Overwrite when a file already exists |
 | Download throttle | Delay between downloads in milliseconds (default 250, range 50–5000) |
+| Allowed Canvas domains | Domain allowlist controlling where the extension can run (multiple entries supported) |
+| Allow subdomains | Global toggle to include subdomains for every allowlisted domain (off by default) |
 | Folder prefix | Custom string prepended to all download paths |
 | ZIP bundling | Bundle each course into a single `.zip` file (on by default; falls back to loose files above ~1.5 GB) |
 | Incremental mode | Track what's been downloaded per course and skip those files next time |
@@ -200,7 +203,7 @@ In ZIP mode, the same structure is bundled into a single `Course Name.zip`. In M
 
 ## How it works
 
-The content script runs on every HTTPS page but immediately exits if it doesn't detect Canvas (it checks for Instructure domains and Canvas-specific DOM elements like `#application`, `.ic-app`, and the CSRF meta tag). On Canvas pages, it calls the Canvas REST API using your session cookies and follows pagination via RFC 5988 Link headers.
+The extension runs only on Canvas domains that you explicitly allow in Settings. On allowed domains, it detects Canvas pages (using domain and Canvas-specific DOM signals) and calls the Canvas REST API with your existing session cookies, following pagination via RFC 5988 Link headers.
 
 It also checks your enrollment in the course. When you have a teacher, TA, or designer role, it unlocks the instructor-only endpoints (student submissions, full discussion threads, the gradebook, quiz answer keys) — these are skipped entirely for students, so a student export only ever contains your own data.
 
@@ -231,7 +234,7 @@ canvas-course-downloader/
 
 ## Permissions
 
-The content script is injected on every HTTPS page (`https://*/*`) because Canvas can be hosted on any domain — universities often run it on their own URLs like `canvas.university.edu`. The script needs to load everywhere to detect Canvas instances, but it exits immediately on non-Canvas pages and makes no network requests outside the Canvas site you're on. Elevated host permissions are scoped narrowly to `*://*.instructure.com/*`; on self-hosted instances the extension works through same-origin requests from the page itself.
+The content script is injected only on domains you configure in the settings allowlist (for example `canvas.university.edu` or `school.instructure.com`). By default matching is exact-host only; you can optionally enable a global setting to include subdomains for all allowlisted domains. Elevated host permissions remain scoped to `*://*.instructure.com/*`, and self-hosted instances work when their domains are allowlisted.
 
 For the full privacy policy, see [PRIVACY.md](PRIVACY.md).
 
